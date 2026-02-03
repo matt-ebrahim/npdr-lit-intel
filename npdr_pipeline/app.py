@@ -69,18 +69,18 @@ def main():
         )
 
         st.markdown("---")
-        st.markdown("**Full Text Retrieval**")
+        st.markdown("**Full Text Retrieval** *(Optional - slow)*")
 
         enable_pmc = st.checkbox(
             "Enable PMC full text",
-            value=True,
-            help="Fetch full text from PubMed Central (~40% coverage)",
+            value=False,
+            help="Fetch full text from PubMed Central (~3-5% yield, adds ~5min)",
         )
 
         enable_biorxiv = st.checkbox(
             "Enable bioRxiv search",
-            value=True,
-            help="Search for preprints on bioRxiv/medRxiv",
+            value=False,
+            help="Search for preprints on bioRxiv/medRxiv (slow due to rate limits)",
         )
 
         st.markdown("---")
@@ -89,8 +89,9 @@ def main():
         max_workers = st.slider(
             "Parallel workers",
             min_value=1,
-            max_value=10,
-            value=5,
+            max_value=20,
+            value=10,
+            help="More workers = faster extraction",
         )
 
     # Main content
@@ -108,7 +109,7 @@ def main():
         st.markdown("**Pipeline Overview:**")
         st.caption("""
         1. Expand term → 2. Search PubMed → 3. Filter quality
-        4. Score relevance → 5. Fetch full text → 6. Extract data
+        2. Score relevance → 5. Extract from abstracts
         """)
 
     # Run pipeline
@@ -121,15 +122,27 @@ def main():
         status = st.empty()
 
         try:
+            # Determine total steps based on options
+            total_steps = 5
+            if enable_pmc:
+                total_steps += 1
+            if enable_biorxiv:
+                total_steps += 1
+            current_step = 0
+
+            def next_step(label):
+                nonlocal current_step
+                current_step += 1
+                status.text(f"Step {current_step}/{total_steps}: {label}")
+                progress_bar.progress(int(current_step / total_steps * 90))
+
             # Step 1: Expand terms
-            status.text("Step 1/6: Expanding clinical term...")
-            progress_bar.progress(5)
+            next_step("Expanding clinical term...")
             terms = expand_clinical_term(clinical_term)
             st.info(f"Expanded to {len(terms)} terms: {', '.join(terms)}")
 
             # Step 2: Search PubMed
-            status.text("Step 2/6: Searching PubMed via Snowflake...")
-            progress_bar.progress(15)
+            next_step("Searching PubMed via Snowflake...")
             articles = search_clinical_ai_literature(terms, max_results_per_query=max_results)
             st.info(f"Found {len(articles)} articles")
 
@@ -138,14 +151,12 @@ def main():
                 return
 
             # Step 3: Filter by journal quality
-            status.text("Step 3/6: Filtering by journal quality...")
-            progress_bar.progress(25)
+            next_step("Filtering by journal quality...")
             articles = filter_by_journal_quality(articles, tier_threshold=2)
             st.info(f"{len(articles)} articles from quality journals")
 
             # Step 4: Filter by relevance
-            status.text("Step 4/6: Scoring relevance with LLM...")
-            progress_bar.progress(35)
+            next_step("Scoring relevance with LLM...")
             articles = score_article_relevance(
                 articles,
                 clinical_term=clinical_term,
@@ -162,13 +173,12 @@ def main():
                 authors = paper.get("authors", [])
                 paper["first_author"] = authors[0] if authors else "Unknown"
 
-            # Step 5: Fetch full text
+            # Optional: Fetch full text (only if enabled)
             full_texts = {}
             pmids = [str(p.get("pmid", "")) for p in articles]
 
             if enable_pmc:
-                status.text("Step 5/6: Fetching PMC full text...")
-                progress_bar.progress(50)
+                next_step("Fetching PMC full text...")
                 pmc_results = batch_fetch_pmc_full_text(pmids, max_workers=max_workers)
                 for pmid, result in pmc_results.items():
                     if result:
@@ -180,8 +190,7 @@ def main():
             if enable_biorxiv:
                 papers_without_ft = [p for p in articles if str(p.get("pmid", "")) not in full_texts]
                 if papers_without_ft:
-                    status.text("Step 5/6: Searching bioRxiv/medRxiv...")
-                    progress_bar.progress(60)
+                    next_step("Searching bioRxiv/medRxiv...")
                     biorxiv_results = batch_search_biorxiv(papers_without_ft, max_workers=3)
 
                     biorxiv_count = 0
@@ -198,11 +207,12 @@ def main():
 
                     st.info(f"Found {biorxiv_count} preprints on bioRxiv/medRxiv")
 
-            # Step 6: Extract structured data
-            status.text("Step 6/6: Extracting structured data with LLM...")
-            progress_bar.progress(75)
+            # Final step: Extract structured data
+            next_step("Extracting structured data from abstracts...")
 
-            extracted = batch_extract(articles, full_texts=full_texts, max_workers=max_workers)
+            # Use more workers for abstract-only extraction (smaller payloads)
+            extract_workers = max_workers * 2 if not full_texts else max_workers
+            extracted = batch_extract(articles, full_texts=full_texts, max_workers=extract_workers)
 
             # Mark papers needing manual review
             for paper in extracted:
