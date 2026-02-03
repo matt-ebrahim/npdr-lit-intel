@@ -1,0 +1,38 @@
+# Environment and secrets
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Output files
+*.csv
+*.json
+!NPDR_AI_Literature_Tracker.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Snowflake token cache
+.snowflake/
