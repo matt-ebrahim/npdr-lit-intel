@@ -277,8 +277,10 @@ def main():
             needs_review = sum(1 for p in extracted if p.get("needs_manual_review") == "Yes")
             st.metric("Needs Review", needs_review)
 
-        # Challenge coverage
+        # Challenge coverage - Interactive
         st.subheader("Challenge Coverage")
+        st.caption("Click on any number to view the matching papers")
+
         challenges = [
             ("Ch1: Long-term Prediction", "addresses_long_term_prediction_ch1"),
             ("Ch2: Early Signals", "identifies_early_signals_ch2"),
@@ -287,15 +289,83 @@ def main():
             ("Ch5: Grading Consistency", "improves_grading_consistency_ch5"),
         ]
 
-        challenge_data = []
-        for name, field in challenges:
-            yes = sum(1 for p in extracted if p.get(field) == "Y")
-            partial = sum(1 for p in extracted if p.get(field) == "Partial")
-            no = sum(1 for p in extracted if p.get(field) == "N")
-            challenge_data.append({"Challenge": name, "Yes": yes, "Partial": partial, "No": no})
+        # Initialize session state for challenge filter
+        if "challenge_filter" not in st.session_state:
+            st.session_state["challenge_filter"] = None
 
-        df_challenges = pd.DataFrame(challenge_data)
-        st.dataframe(df_challenges, use_container_width=True, hide_index=True)
+        # Create header row
+        header_cols = st.columns([3, 1, 1, 1])
+        header_cols[0].markdown("**Challenge**")
+        header_cols[1].markdown("**Yes**")
+        header_cols[2].markdown("**Partial**")
+        header_cols[3].markdown("**No**")
+
+        # Create clickable rows for each challenge
+        for name, field in challenges:
+            yes_papers = [p for p in extracted if p.get(field) == "Y"]
+            partial_papers = [p for p in extracted if p.get(field) == "Partial"]
+            no_papers = [p for p in extracted if p.get(field) == "N"]
+
+            cols = st.columns([3, 1, 1, 1])
+            cols[0].markdown(f"{name}")
+
+            # Yes button
+            if cols[1].button(f"{len(yes_papers)}", key=f"{field}_yes", disabled=len(yes_papers) == 0):
+                st.session_state["challenge_filter"] = {
+                    "name": name,
+                    "field": field,
+                    "status": "Y",
+                    "status_label": "Yes",
+                    "papers": yes_papers,
+                }
+
+            # Partial button
+            if cols[2].button(f"{len(partial_papers)}", key=f"{field}_partial", disabled=len(partial_papers) == 0):
+                st.session_state["challenge_filter"] = {
+                    "name": name,
+                    "field": field,
+                    "status": "Partial",
+                    "status_label": "Partial",
+                    "papers": partial_papers,
+                }
+
+            # No button
+            if cols[3].button(f"{len(no_papers)}", key=f"{field}_no", disabled=len(no_papers) == 0):
+                st.session_state["challenge_filter"] = {
+                    "name": name,
+                    "field": field,
+                    "status": "N",
+                    "status_label": "No",
+                    "papers": no_papers,
+                }
+
+        # Display filtered papers if a challenge is selected
+        if st.session_state.get("challenge_filter"):
+            filter_info = st.session_state["challenge_filter"]
+            papers_to_show = filter_info["papers"]
+
+            st.markdown("---")
+            st.subheader(f"📋 {filter_info['name']} - {filter_info['status_label']} ({len(papers_to_show)} papers)")
+
+            if st.button("✕ Clear filter"):
+                st.session_state["challenge_filter"] = None
+                st.rerun()
+
+            for paper in papers_to_show:
+                pmid = paper.get("pmid", "")
+                pubmed_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                title = paper.get("title", "No title")
+                overview = paper.get("key_findings", "") or paper.get("relevance_reason", "") or "No overview available"
+
+                st.markdown(f"""
+**{title}**
+
+{overview}
+
+🔗 [View on PubMed]({pubmed_url})
+
+---
+""")
 
         # Download button
         st.subheader("Export")
