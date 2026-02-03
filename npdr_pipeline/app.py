@@ -69,6 +69,17 @@ def main():
         )
 
         st.markdown("---")
+        st.markdown("**Journal Quality Filter**")
+
+        journal_tier = st.radio(
+            "Journal tier threshold",
+            options=[1, 2],
+            index=1,  # Default to tier 2 (both tiers)
+            format_func=lambda x: "Tier 1 only (top journals)" if x == 1 else "Tier 1 + 2 (more journals)",
+            help="Tier 1: Nature Medicine, JAMA, Lancet, Ophthalmology, etc. Tier 2: Scientific Reports, European Radiology, BJO, etc.",
+        )
+
+        st.markdown("---")
         st.markdown("**Full Text Retrieval** *(Optional - slow)*")
 
         enable_pmc = st.checkbox(
@@ -152,7 +163,7 @@ def main():
 
             # Step 3: Filter by journal quality
             next_step("Filtering by journal quality...")
-            articles = filter_by_journal_quality(articles, tier_threshold=2)
+            articles = filter_by_journal_quality(articles, tier_threshold=journal_tier)
             st.info(f"{len(articles)} articles from quality journals")
 
             # Step 4: Filter by relevance
