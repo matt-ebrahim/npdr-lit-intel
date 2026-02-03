@@ -33,9 +33,9 @@ IMPORTANT: Only return the JSON array, no other text."""
 def score_article_relevance(
     articles: list[dict],
     clinical_term: str,
-    batch_size: int = 15,  # Larger batches = fewer API calls
+    batch_size: int = 25,  # OPTIMIZED: Larger batches = fewer API calls
     min_score: int = 7,
-    max_workers: int = 10,  # Parallel LLM calls for speed
+    max_workers: int = 15,  # OPTIMIZED: More parallel workers
 ) -> list[dict]:
     """Score articles for relevance using LLM and filter by minimum score.
 

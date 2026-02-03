@@ -47,12 +47,77 @@ def calculate_similarity(title1: str, title2: str) -> float:
     return SequenceMatcher(None, norm1, norm2).ratio()
 
 
+def search_europe_pmc_preprints(title: str, match_threshold: float = TITLE_MATCH_THRESHOLD) -> Optional[dict]:
+    """Search Europe PMC for preprints by title.
+
+    Europe PMC indexes bioRxiv and medRxiv preprints and has better search.
+    """
+    if not title:
+        return None
+
+    # Clean title for search query
+    search_title = title.replace('"', '').replace(':', ' ')[:200]
+
+    try:
+        # Europe PMC API - search for preprints
+        url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+        params = {
+            "query": f'TITLE:"{search_title}" AND SRC:PPR',  # PPR = preprints
+            "format": "json",
+            "pageSize": 10,
+        }
+
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        results = data.get("resultList", {}).get("result", [])
+
+        best_match = None
+        best_score = 0
+
+        for paper in results:
+            paper_title = paper.get("title", "")
+            score = calculate_similarity(title, paper_title)
+
+            if score > best_score and score >= match_threshold:
+                best_score = score
+                best_match = paper
+
+        if best_match:
+            doi = best_match.get("doi", "")
+            source = best_match.get("bookOrReportDetails", {}).get("publisher", "preprint")
+
+            return {
+                "found": True,
+                "server": "medrxiv" if "medrxiv" in source.lower() else "biorxiv",
+                "doi": doi,
+                "title": best_match.get("title", ""),
+                "authors": best_match.get("authorString", ""),
+                "date": best_match.get("firstPublicationDate", ""),
+                "abstract": best_match.get("abstractText", ""),
+                "url": f"https://doi.org/{doi}" if doi else "",
+                "match_score": best_score,
+                "is_preprint": True,
+                "note": "Data from preprint; may differ from published version",
+            }
+
+    except Exception as e:
+        pass  # Silently fail, will try other methods
+
+    return None
+
+
 def search_biorxiv_by_title(
     title: str,
     server: str = "biorxiv",
     match_threshold: float = TITLE_MATCH_THRESHOLD,
 ) -> Optional[dict]:
     """Search bioRxiv/medRxiv for a paper by title.
+
+    Uses multiple strategies:
+    1. Europe PMC (indexes preprints with good search)
+    2. bioRxiv API with pagination
 
     Args:
         title: Paper title to search for
@@ -65,42 +130,49 @@ def search_biorxiv_by_title(
     if not title:
         return None
 
-    # Extract key terms from title for search
-    # bioRxiv content API doesn't have direct title search, so we use date range
-    # and filter results. For better results, we search recent preprints.
+    # Strategy 1: Try Europe PMC first (better search)
+    result = search_europe_pmc_preprints(title, match_threshold)
+    if result:
+        return result
 
-    # Try the details endpoint with a broad date range
-    # This searches the last 2 years of preprints
+    # Strategy 2: bioRxiv API with pagination
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
 
-    # Use the pubs endpoint which allows searching
-    # Format: /pubs/{server}/{interval}
-    # We'll search in chunks to find matches
-
     try:
-        # First, try searching via the content API with cursor
-        # This searches all preprints and we filter by title
-        url = f"{BIORXIV_API_BASE}/details/{server}/{start_date}/{end_date}/0/json"
-
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-
-        if "collection" not in data:
-            return None
-
-        # Search through results for title match
         best_match = None
         best_score = 0
 
-        for paper in data.get("collection", []):
-            paper_title = paper.get("title", "")
-            score = calculate_similarity(title, paper_title)
+        # Paginate through results (100 per page, check up to 500)
+        for cursor in range(0, 500, 100):
+            url = f"{BIORXIV_API_BASE}/details/{server}/{start_date}/{end_date}/{cursor}/json"
 
-            if score > best_score and score >= match_threshold:
-                best_score = score
-                best_match = paper
+            response = requests.get(url, timeout=30)
+            if response.status_code != 200:
+                break
+
+            data = response.json()
+            papers = data.get("collection", [])
+
+            if not papers:
+                break
+
+            for paper in papers:
+                paper_title = paper.get("title", "")
+                score = calculate_similarity(title, paper_title)
+
+                if score > best_score and score >= match_threshold:
+                    best_score = score
+                    best_match = paper
+
+                    # If very high match, return immediately
+                    if best_score >= 0.95:
+                        break
+
+            if best_score >= 0.95:
+                break
+
+            time.sleep(REQUEST_DELAY)
 
         if best_match:
             return {
