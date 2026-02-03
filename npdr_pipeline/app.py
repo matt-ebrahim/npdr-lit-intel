@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 
 from trial_lit_intel.term_expander import expand_clinical_term
 from trial_lit_intel.snowflake_search import search_clinical_ai_literature, AI_TERMS
+from trial_lit_intel.mesh_search import search_pubmed_by_mesh
 from trial_lit_intel.relevance_filter import score_article_relevance
 from trial_lit_intel.journal_filter import filter_by_journal_quality
 from trial_lit_intel.llm_client import get_completion
@@ -166,12 +167,21 @@ def main():
     with st.sidebar:
         st.header("Pipeline Settings")
 
+        st.markdown("**Search Method**")
+        search_method = st.radio(
+            "Term expansion",
+            options=["mesh", "text"],
+            index=0,
+            format_func=lambda x: "MeSH ontology (snek)" if x == "mesh" else "Text-based (LLM)",
+            help="MeSH uses standardized medical ontology via snek. Text uses LLM-generated synonyms.",
+        )
+
         max_results = st.slider(
-            "Max results per query",
-            min_value=10,
-            max_value=100,
-            value=30,
-            step=10,
+            "Max results",
+            min_value=50,
+            max_value=1000,
+            value=500,
+            step=50,
         )
 
         min_relevance = st.slider(
@@ -259,7 +269,7 @@ def main():
     with col2:
         st.markdown("**Pipeline Overview:**")
         st.caption("""
-        1. Expand term → 2. Search PubMed → 3. Deduplicate
+        1. Map to MeSH (snek) → 2. Search PubMed → 3. Deduplicate
         4. Filter quality → 5. Score relevance → 6. Extract data
         """)
 
@@ -292,15 +302,20 @@ def main():
                 status.text(f"Step {current_step}/{total_steps}: {label}")
                 progress_bar.progress(int(current_step / total_steps * 95))
 
-            # Step 1: Expand terms
-            next_step("Expanding clinical term...")
-            terms = expand_clinical_term(clinical_term)
-            st.info(f"Expanded to {len(terms)} terms: {', '.join(terms)}")
+            # Step 1 & 2: Search based on method
+            if search_method == "mesh":
+                next_step("Mapping to MeSH terms via snek...")
+                next_step("Searching PubMed by MeSH terms...")
+                articles = search_pubmed_by_mesh(clinical_term, max_results=max_results, min_year=year_range[0])
+                st.info(f"Found {len(articles)} articles via MeSH search")
+            else:
+                next_step("Expanding clinical term...")
+                terms = expand_clinical_term(clinical_term)
+                st.info(f"Expanded to {len(terms)} terms: {', '.join(terms)}")
 
-            # Step 2: Search PubMed
-            next_step("Searching PubMed via Snowflake...")
-            articles = search_clinical_ai_literature(terms, max_results_per_query=max_results)
-            st.info(f"Found {len(articles)} articles")
+                next_step("Searching PubMed via Snowflake...")
+                articles = search_clinical_ai_literature(terms, max_results_per_query=max_results // 15)
+                st.info(f"Found {len(articles)} articles")
 
             if not articles:
                 st.warning("No articles found. Try adjusting your search term.")
@@ -313,9 +328,10 @@ def main():
             if original_count != len(articles):
                 st.info(f"Removed {original_count - len(articles)} duplicates → {len(articles)} unique articles")
 
-            # Step 4: Filter by year range
-            articles = [a for a in articles if year_range[0] <= int(a.get("year", 0) or 0) <= year_range[1]]
-            st.info(f"{len(articles)} articles in year range {year_range[0]}-{year_range[1]}")
+            # Step 4: Filter by year range (if not already done by MeSH search)
+            if search_method != "mesh":
+                articles = [a for a in articles if year_range[0] <= int(a.get("year", 0) or 0) <= year_range[1]]
+                st.info(f"{len(articles)} articles in year range {year_range[0]}-{year_range[1]}")
 
             # Step 5: Filter by journal quality
             next_step("Filtering by journal quality...")
