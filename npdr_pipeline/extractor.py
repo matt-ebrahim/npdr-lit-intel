@@ -2,6 +2,7 @@
 
 OPTIMIZED: Uses single LLM call per paper instead of 3 separate calls.
 Uses Claude Sonnet for structured extraction from abstracts and full text.
+Supports dynamic challenge configuration for any clinical indication.
 """
 
 import json
@@ -16,8 +17,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
     from trial_lit_intel.llm_client import get_completion, get_completions_parallel_sync
+    from trial_lit_intel.challenge_classifier import (
+        STANDARD_CHALLENGES,
+        build_dynamic_extraction_prompt,
+    )
 except ImportError:
     from .llm_client_local import get_completion
+    STANDARD_CHALLENGES = {}
+    build_dynamic_extraction_prompt = None
 
 
 # Model selection
@@ -100,10 +107,56 @@ class NPDRExtractor:
     """Extract structured data from papers for NPDR tracker.
 
     OPTIMIZED: Uses single LLM call per paper (was 3 calls before).
+    Supports dynamic challenge configuration for any clinical indication.
     """
 
-    def __init__(self, model: str = None):
+    def __init__(self, model: str = None, challenges: list = None, clinical_term: str = None, custom_focus: str = None):
+        """Initialize extractor.
+
+        Args:
+            model: LLM model to use (default: sonnet)
+            challenges: List of challenge IDs to assess (default: all standard challenges)
+            clinical_term: Clinical condition being studied (default: diabetic retinopathy)
+            custom_focus: Optional specific focus area from user
+        """
         self.model = model or EXTRACTION_MODEL
+        self.challenges = challenges or list(STANDARD_CHALLENGES.keys()) if STANDARD_CHALLENGES else []
+        self.clinical_term = clinical_term or "diabetic retinopathy"
+        self.custom_focus = custom_focus
+
+        # Build the extraction prompt based on configuration
+        self._build_extraction_prompt()
+
+    def _build_extraction_prompt(self):
+        """Build the extraction prompt based on configured challenges."""
+        if build_dynamic_extraction_prompt and self.challenges:
+            self.extraction_prompt = build_dynamic_extraction_prompt(
+                self.challenges,
+                self.clinical_term,
+                self.custom_focus,
+            )
+        else:
+            # Fallback to default prompt
+            self.extraction_prompt = COMBINED_EXTRACTION_PROMPT
+
+        # Build list of expected fields based on challenges
+        self.expected_fields = [
+            # Methodology fields (always included)
+            "task_type", "imaging_modality", "other_input_features", "prediction_target",
+            "prediction_horizon", "model_architecture", "training_dataset", "dataset_size",
+            "external_validation", "primary_metric", "primary_metric_value", "secondary_metrics",
+        ]
+
+        # Add challenge-specific fields
+        if STANDARD_CHALLENGES:
+            for cid in self.challenges:
+                if cid in STANDARD_CHALLENGES:
+                    self.expected_fields.append(STANDARD_CHALLENGES[cid]["extraction_field"])
+
+        # Synthesis fields (always included)
+        self.expected_fields.extend([
+            "relevance_to_study", "potential_application", "key_findings", "limitations",
+        ])
 
     def extract_from_abstract(self, paper: dict) -> dict:
         """Extract data from abstract only (Tier 1)."""
@@ -136,11 +189,11 @@ class NPDRExtractor:
             "extraction_confidence": "High" if source == "Full Text" else "Medium",
         }
 
-        # Single combined prompt for all fields
+        # Single combined prompt for all fields (uses dynamic prompt based on challenges)
         prompt = f"""Paper text:
 {text[:60000]}
 
-{COMBINED_EXTRACTION_PROMPT}"""
+{self.extraction_prompt}"""
 
         try:
             response = get_completion(prompt, model=self.model)
@@ -166,8 +219,8 @@ class NPDRExtractor:
 
         try:
             data = json.loads(response)
-            # Ensure all expected fields exist
-            for field in ALL_FIELDS:
+            # Ensure all expected fields exist (using dynamic field list)
+            for field in self.expected_fields:
                 if field not in data:
                     data[field] = "Not reported"
             return data
@@ -188,11 +241,12 @@ class NPDRExtractor:
     def _empty_all_fields(self) -> dict:
         """Return dict with all fields set to default values."""
         defaults = {}
-        for field in ALL_FIELDS:
+        for field in self.expected_fields:
             if field.startswith("addresses_") or field.startswith("identifies_") or \
-               field.startswith("handles_") or field.startswith("improves_"):
+               field.startswith("handles_") or field.startswith("improves_") or \
+               field.startswith("enables_"):
                 defaults[field] = "N/A"
-            elif field == "relevance_to_blkr201":
+            elif field == "relevance_to_study":
                 defaults[field] = "Requires manual review"
             else:
                 defaults[field] = "Not reported"
@@ -203,6 +257,9 @@ def batch_extract(
     papers: list,
     full_texts: dict = None,
     max_workers: int = 10,  # Increased default workers
+    challenges: list = None,
+    clinical_term: str = None,
+    custom_focus: str = None,
 ) -> list:
     """Extract data from multiple papers in parallel.
 
@@ -210,12 +267,26 @@ def batch_extract(
     - Uses single LLM call per paper (was 3)
     - Increased default workers to 10
     - Better progress reporting
+
+    Args:
+        papers: List of paper dicts to extract
+        full_texts: Dict of PMID -> full text content
+        max_workers: Number of parallel workers
+        challenges: List of challenge IDs to assess (default: all standard)
+        clinical_term: Clinical condition being studied
+        custom_focus: Optional specific focus area from user
     """
     full_texts = full_texts or {}
-    extractor = NPDRExtractor()
+    extractor = NPDRExtractor(
+        challenges=challenges,
+        clinical_term=clinical_term,
+        custom_focus=custom_focus,
+    )
 
     print(f"\nExtracting structured data from {len(papers)} papers...")
     print(f"Model: {EXTRACTION_MODEL}, parallel workers: {max_workers}")
+    print(f"Clinical term: {extractor.clinical_term}")
+    print(f"Challenges: {len(extractor.challenges)} categories")
     print(f"Optimization: Single LLM call per paper (3x faster)")
 
     def extract_paper(paper):

@@ -19,15 +19,20 @@ from trial_lit_intel.mesh_search import search_pubmed_by_mesh
 from trial_lit_intel.relevance_filter import score_article_relevance
 from trial_lit_intel.journal_filter import filter_by_journal_quality
 from trial_lit_intel.llm_client import get_completion
+from trial_lit_intel.challenge_classifier import (
+    STANDARD_CHALLENGES,
+    classify_user_intent,
+    get_challenge_display_names,
+)
 
 from npdr_pipeline.pmc_fetcher import batch_fetch_pmc_full_text
 from npdr_pipeline.biorxiv_fetcher import batch_search_biorxiv
-from npdr_pipeline.extractor import batch_extract
+from npdr_pipeline.extractor import batch_extract, NPDRExtractor
 from npdr_pipeline.npdr_tracker import CSV_COLUMNS, FIELD_TO_COLUMN
 
 # Page config
 st.set_page_config(
-    page_title="NPDR Literature Tracker",
+    page_title="Clinical AI Literature Tracker",
     page_icon="🔬",
     layout="wide",
 )
@@ -65,29 +70,29 @@ def deduplicate_papers(papers: list) -> list:
     return unique_papers
 
 
-def generate_research_gaps(papers: list, clinical_term: str) -> str:
+def generate_research_gaps(papers: list, clinical_term: str, selected_challenges: list = None) -> str:
     """Use LLM to identify research gaps in the literature."""
     # Summarize what's covered
     methods = [p.get("model_architecture", "") for p in papers if p.get("model_architecture")]
     tasks = [p.get("task_type", "") for p in papers if p.get("task_type")]
-    challenges_covered = {
-        "long_term": sum(1 for p in papers if p.get("addresses_long_term_prediction_ch1") == "Y"),
-        "early_signals": sum(1 for p in papers if p.get("identifies_early_signals_ch2") == "Y"),
-        "low_events": sum(1 for p in papers if p.get("handles_low_event_rates_ch3") == "Y"),
-        "rapid_prog": sum(1 for p in papers if p.get("identifies_rapid_progressors_ch4") == "Y"),
-        "grading": sum(1 for p in papers if p.get("improves_grading_consistency_ch5") == "Y"),
-    }
+
+    # Build dynamic challenge coverage based on selected challenges
+    selected_challenges = selected_challenges or list(STANDARD_CHALLENGES.keys())
+    challenges_text = []
+
+    for cid in selected_challenges:
+        if cid in STANDARD_CHALLENGES:
+            info = STANDARD_CHALLENGES[cid]
+            field = info["extraction_field"]
+            count = sum(1 for p in papers if p.get(field) == "Y")
+            challenges_text.append(f"- {info['name']}: {count} papers")
 
     prompt = f"""Analyze this summary of {len(papers)} AI/ML papers on {clinical_term}:
 
 Methods used: {Counter(methods).most_common(10)}
 Task types: {Counter(tasks).most_common(10)}
 Challenge coverage:
-- Long-term prediction: {challenges_covered['long_term']} papers
-- Early signal detection: {challenges_covered['early_signals']} papers
-- Low event rate handling: {challenges_covered['low_events']} papers
-- Rapid progressor identification: {challenges_covered['rapid_prog']} papers
-- Grading consistency: {challenges_covered['grading']} papers
+{chr(10).join(challenges_text)}
 
 Based on this, identify 3-5 key RESEARCH GAPS - areas that are understudied or missing.
 Be specific and actionable. Format as bullet points."""
@@ -160,8 +165,8 @@ def cluster_papers(papers: list) -> dict:
 
 
 def main():
-    st.title("🔬 NPDR AI Literature Tracker")
-    st.markdown("*Structured extraction for diabetic retinopathy AI/ML literature*")
+    st.title("🔬 Clinical AI Literature Tracker")
+    st.markdown("*Structured extraction for clinical AI/ML literature - any indication*")
 
     # Get current year for date filters
     current_year = datetime.now().year
@@ -256,6 +261,81 @@ def main():
             value=True,
             help="Analyze method trends over time",
         )
+
+    # Main content - Challenge Configuration Section
+    st.subheader("Challenge Configuration")
+    st.caption("Describe your research needs and the LLM will map them to standard clinical AI challenges.")
+
+    # Initialize session state for challenges
+    if "classified_challenges" not in st.session_state:
+        st.session_state["classified_challenges"] = None
+    if "selected_challenges" not in st.session_state:
+        st.session_state["selected_challenges"] = list(STANDARD_CHALLENGES.keys())
+    if "custom_focus" not in st.session_state:
+        st.session_state["custom_focus"] = None
+
+    # Text area for user to describe their needs
+    user_description = st.text_area(
+        "Describe what you're looking for:",
+        placeholder="e.g., 'I want to find papers that predict disease progression over 2+ years and identify patients who worsen quickly for clinical trial enrichment'",
+        help="Describe your research goals in natural language. The LLM will map this to standard challenge categories.",
+        height=100,
+    )
+
+    col_classify, col_reset = st.columns([2, 1])
+
+    with col_classify:
+        if st.button("Classify Intent", type="secondary", use_container_width=True):
+            if user_description.strip():
+                with st.spinner("Analyzing your research needs..."):
+                    result = classify_user_intent(user_description)
+                    st.session_state["classified_challenges"] = result
+                    st.session_state["selected_challenges"] = result.get("relevant_challenges", [])
+                    st.session_state["custom_focus"] = result.get("custom_focus")
+            else:
+                st.warning("Please describe what you're looking for.")
+
+    with col_reset:
+        if st.button("Use All Challenges", use_container_width=True):
+            st.session_state["classified_challenges"] = None
+            st.session_state["selected_challenges"] = list(STANDARD_CHALLENGES.keys())
+            st.session_state["custom_focus"] = None
+
+    # Display classification results
+    if st.session_state.get("classified_challenges"):
+        result = st.session_state["classified_challenges"]
+
+        st.markdown("**LLM Analysis:**")
+        st.info(result.get("reasoning", "No reasoning provided"))
+
+        if result.get("custom_focus"):
+            st.markdown(f"**Specific Focus:** {result['custom_focus']}")
+
+    # Challenge selection checkboxes
+    st.markdown("**Select Challenges to Assess:**")
+
+    challenge_cols = st.columns(2)
+    selected = []
+
+    for i, (cid, info) in enumerate(STANDARD_CHALLENGES.items()):
+        col = challenge_cols[i % 2]
+        is_selected = cid in st.session_state.get("selected_challenges", [])
+
+        with col:
+            if st.checkbox(
+                f"{info['name']}",
+                value=is_selected,
+                key=f"challenge_{cid}",
+                help=info["description"],
+            ):
+                selected.append(cid)
+
+    # Update selected challenges
+    st.session_state["selected_challenges"] = selected if selected else list(STANDARD_CHALLENGES.keys())
+
+    st.caption(f"Selected: {len(st.session_state['selected_challenges'])} challenges")
+
+    st.markdown("---")
 
     # Main content
     st.subheader("Search Configuration")
@@ -393,10 +473,19 @@ def main():
 
             # Custom extraction with progress display
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            from npdr_pipeline.extractor import NPDRExtractor
 
-            extractor = NPDRExtractor()
+            # Get selected challenges from session state
+            selected_challenges = st.session_state.get("selected_challenges", list(STANDARD_CHALLENGES.keys()))
+            custom_focus = st.session_state.get("custom_focus")
+
+            extractor = NPDRExtractor(
+                challenges=selected_challenges,
+                clinical_term=clinical_term,
+                custom_focus=custom_focus,
+            )
             extract_workers = max_workers * 2 if not full_texts else max_workers
+
+            st.info(f"Assessing {len(selected_challenges)} challenges: {', '.join(STANDARD_CHALLENGES[c]['name'] for c in selected_challenges if c in STANDARD_CHALLENGES)}")
 
             def extract_single(paper):
                 pmid = str(paper.get("pmid", ""))
@@ -448,7 +537,7 @@ def main():
 
             if enable_gap_analysis:
                 next_step("Analyzing research gaps...")
-                gap_analysis = generate_research_gaps(extracted, clinical_term)
+                gap_analysis = generate_research_gaps(extracted, clinical_term, selected_challenges)
 
             if enable_trend_analysis:
                 next_step("Analyzing trends...")
@@ -463,6 +552,7 @@ def main():
             st.session_state["gap_analysis"] = gap_analysis
             st.session_state["trend_analysis"] = trend_analysis
             st.session_state["year_range"] = year_range  # Store initial year range
+            st.session_state["results_challenges"] = selected_challenges  # Store challenges used for extraction
 
         except Exception as e:
             st.error(f"Pipeline error: {str(e)}")
@@ -503,15 +593,18 @@ def main():
 
         with filter_col3:
             relevance_filter = st.multiselect(
-                "Relevance to BLKR-201",
+                "Relevance to study",
                 options=["High", "Medium", "Low"],
                 default=["High", "Medium", "Low"],
             )
 
-        # Apply filters
+        # Apply filters - check both old and new field names for backward compatibility
+        def get_relevance(p):
+            return p.get("relevance_to_study") or p.get("relevance_to_blkr201", "Unknown")
+
         filtered = [p for p in extracted
                     if year_filter[0] <= int(p.get("year", 0) or 0) <= year_filter[1]
-                    and p.get("relevance_to_blkr201", "Unknown") in relevance_filter + ["Unknown"]]
+                    and get_relevance(p) in relevance_filter + ["Unknown"]]
 
         # Apply sorting
         if sort_option == "Year (newest)":
@@ -520,7 +613,7 @@ def main():
             filtered.sort(key=lambda x: int(x.get("year", 0) or 0))
         elif sort_option == "Relevance (high)":
             relevance_order = {"High": 0, "Medium": 1, "Low": 2, "Unknown": 3}
-            filtered.sort(key=lambda x: relevance_order.get(x.get("relevance_to_blkr201", "Unknown"), 3))
+            filtered.sort(key=lambda x: relevance_order.get(get_relevance(x), 3))
         elif sort_option == "Journal Tier":
             filtered.sort(key=lambda x: x.get("journal_tier", 99))
 
@@ -558,33 +651,35 @@ def main():
                 st.plotly_chart(fig, use_container_width=True)
 
         with viz_tab3:
-            # Challenge coverage heatmap
-            challenges = [
-                ("Long-term Prediction", "addresses_long_term_prediction_ch1"),
-                ("Early Signals", "identifies_early_signals_ch2"),
-                ("Low Event Rates", "handles_low_event_rates_ch3"),
-                ("Rapid Progressors", "identifies_rapid_progressors_ch4"),
-                ("Grading Consistency", "improves_grading_consistency_ch5"),
-            ]
+            # Challenge coverage heatmap - using dynamic challenges
+            selected_challenges = st.session_state.get("selected_challenges", list(STANDARD_CHALLENGES.keys()))
+            challenges_for_viz = []
+            for cid in selected_challenges:
+                if cid in STANDARD_CHALLENGES:
+                    info = STANDARD_CHALLENGES[cid]
+                    challenges_for_viz.append((info["name"], info["extraction_field"]))
 
             heatmap_data = []
-            for name, field in challenges:
+            for name, field in challenges_for_viz:
                 yes = sum(1 for p in filtered if p.get(field) == "Y")
                 partial = sum(1 for p in filtered if p.get(field) == "Partial")
                 no = sum(1 for p in filtered if p.get(field) == "N")
                 heatmap_data.append([yes, partial, no])
 
-            fig = go.Figure(data=go.Heatmap(
-                z=heatmap_data,
-                x=["Yes", "Partial", "No"],
-                y=[c[0] for c in challenges],
-                colorscale="Blues",
-                text=heatmap_data,
-                texttemplate="%{text}",
-                textfont={"size": 14},
-            ))
-            fig.update_layout(title="Challenge Coverage Heatmap", height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            if heatmap_data:
+                fig = go.Figure(data=go.Heatmap(
+                    z=heatmap_data,
+                    x=["Yes", "Partial", "No"],
+                    y=[c[0] for c in challenges_for_viz],
+                    colorscale="Blues",
+                    text=heatmap_data,
+                    texttemplate="%{text}",
+                    textfont={"size": 14},
+                ))
+                fig.update_layout(title="Challenge Coverage Heatmap", height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No challenges selected for visualization.")
 
         with viz_tab4:
             # Method clusters
@@ -638,13 +733,13 @@ def main():
         st.subheader("Challenge Coverage")
         st.caption("Click on any number to view matching papers")
 
-        challenges = [
-            ("Ch1: Long-term Prediction", "addresses_long_term_prediction_ch1"),
-            ("Ch2: Early Signals", "identifies_early_signals_ch2"),
-            ("Ch3: Low Event Rates", "handles_low_event_rates_ch3"),
-            ("Ch4: Rapid Progressors", "identifies_rapid_progressors_ch4"),
-            ("Ch5: Grading Consistency", "improves_grading_consistency_ch5"),
-        ]
+        # Build dynamic challenges list from selected challenges
+        selected_challenges = st.session_state.get("selected_challenges", list(STANDARD_CHALLENGES.keys()))
+        challenges_for_table = []
+        for cid in selected_challenges:
+            if cid in STANDARD_CHALLENGES:
+                info = STANDARD_CHALLENGES[cid]
+                challenges_for_table.append((info["name"], info["extraction_field"]))
 
         if "challenge_filter" not in st.session_state:
             st.session_state["challenge_filter"] = None
@@ -655,7 +750,7 @@ def main():
         header_cols[2].markdown("**Partial**")
         header_cols[3].markdown("**No**")
 
-        for name, field in challenges:
+        for name, field in challenges_for_table:
             yes_papers = [p for p in filtered if p.get(field) == "Y"]
             partial_papers = [p for p in filtered if p.get(field) == "Partial"]
             no_papers = [p for p in filtered if p.get(field) == "N"]
@@ -723,7 +818,7 @@ def main():
         st.subheader("Extracted Papers")
 
         for i, paper in enumerate(filtered[:50], 1):
-            relevance = paper.get("relevance_to_blkr201", "Unknown")
+            relevance = get_relevance(paper)
             relevance_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}.get(relevance, "⚪")
             source = paper.get("data_source", "Unknown")
             needs_review_icon = "⚠️" if paper.get("needs_manual_review") == "Yes" else ""
