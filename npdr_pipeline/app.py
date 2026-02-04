@@ -35,7 +35,162 @@ st.set_page_config(
     page_title="Clinical AI Literature Tracker",
     page_icon="🔬",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
+
+# Custom CSS for better UI
+st.markdown("""
+<style>
+    /* Main container styling */
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        max-width: 1200px;
+    }
+
+    /* Header styling */
+    h1 {
+        color: #4DA6FF !important;
+        font-weight: 600 !important;
+        margin-bottom: 0.5rem !important;
+    }
+
+    h2, h3 {
+        color: #E0E0E0 !important;
+        font-weight: 500 !important;
+    }
+
+    /* Card-like containers */
+    .stExpander {
+        background-color: #1E2530 !important;
+        border: 1px solid #2D3748 !important;
+        border-radius: 8px !important;
+        margin-bottom: 0.5rem !important;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetricValue"] {
+        font-size: 2rem !important;
+        color: #4DA6FF !important;
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: #A0AEC0 !important;
+    }
+
+    /* Button styling */
+    .stButton > button {
+        background-color: #4DA6FF !important;
+        color: #0E1117 !important;
+        border: none !important;
+        border-radius: 6px !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+    }
+
+    .stButton > button:hover {
+        background-color: #3182CE !important;
+        box-shadow: 0 4px 12px rgba(77, 166, 255, 0.3) !important;
+    }
+
+    /* Secondary buttons (challenge table) */
+    .stButton > button[kind="secondary"] {
+        background-color: #2D3748 !important;
+        color: #E0E0E0 !important;
+    }
+
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background-color: #1A1F2C !important;
+    }
+
+    [data-testid="stSidebar"] .stMarkdown {
+        color: #E0E0E0 !important;
+    }
+
+    /* Input fields */
+    .stTextInput > div > div > input,
+    .stTextArea > div > div > textarea {
+        background-color: #1E2530 !important;
+        border: 1px solid #2D3748 !important;
+        border-radius: 6px !important;
+        color: #FAFAFA !important;
+    }
+
+    .stTextInput > div > div > input:focus,
+    .stTextArea > div > div > textarea:focus {
+        border-color: #4DA6FF !important;
+        box-shadow: 0 0 0 1px #4DA6FF !important;
+    }
+
+    /* Select boxes and sliders */
+    .stSelectbox > div > div,
+    .stMultiSelect > div > div {
+        background-color: #1E2530 !important;
+        border-color: #2D3748 !important;
+    }
+
+    /* Info/Warning/Error boxes */
+    .stAlert {
+        border-radius: 6px !important;
+    }
+
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #1E2530;
+        border-radius: 8px;
+        padding: 4px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 6px !important;
+        color: #A0AEC0 !important;
+        background-color: transparent !important;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: #4DA6FF !important;
+        color: #0E1117 !important;
+    }
+
+    /* Progress bar */
+    .stProgress > div > div > div > div {
+        background-color: #4DA6FF !important;
+    }
+
+    /* Checkbox styling */
+    .stCheckbox > label > div[data-testid="stMarkdownContainer"] > p {
+        color: #E0E0E0 !important;
+    }
+
+    /* Download button */
+    .stDownloadButton > button {
+        background-color: #38A169 !important;
+        width: 100% !important;
+    }
+
+    .stDownloadButton > button:hover {
+        background-color: #2F855A !important;
+    }
+
+    /* Divider */
+    hr {
+        border-color: #2D3748 !important;
+        margin: 1.5rem 0 !important;
+    }
+
+    /* Caption text */
+    .stCaption {
+        color: #718096 !important;
+    }
+
+    /* Plotly charts dark theme */
+    .js-plotly-plot .plotly .modebar {
+        background-color: transparent !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 
 def create_csv_download(papers: list) -> bytes:
@@ -165,8 +320,15 @@ def cluster_papers(papers: list) -> dict:
 
 
 def main():
-    st.title("🔬 Clinical AI Literature Tracker")
-    st.markdown("*Structured extraction for clinical AI/ML literature - any indication*")
+    # Header with logo-like styling
+    st.markdown("""
+    <div style="text-align: center; padding: 1rem 0 2rem 0;">
+        <h1 style="margin-bottom: 0.25rem;">🔬 Clinical AI Literature Tracker</h1>
+        <p style="color: #718096; font-size: 1.1rem; margin: 0;">
+            Structured extraction for clinical AI/ML literature across any indication
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Get current year for date filters
     current_year = datetime.now().year
@@ -262,9 +424,8 @@ def main():
             help="Analyze method trends over time",
         )
 
-    # Main content - Challenge Configuration Section
-    st.subheader("Challenge Configuration")
-    st.caption("Describe your research needs and the LLM will map them to standard clinical AI challenges.")
+    # Main content - Two column layout for search config and challenge config
+    search_col, challenge_col = st.columns([1, 1])
 
     # Initialize session state for challenges
     if "classified_challenges" not in st.session_state:
@@ -274,51 +435,73 @@ def main():
     if "custom_focus" not in st.session_state:
         st.session_state["custom_focus"] = None
 
-    # Text area for user to describe their needs
-    user_description = st.text_area(
-        "Describe what you're looking for:",
-        placeholder="e.g., 'I want to find papers that predict disease progression over 2+ years and identify patients who worsen quickly for clinical trial enrichment'",
-        help="Describe your research goals in natural language. The LLM will map this to standard challenge categories.",
-        height=100,
-    )
+    with search_col:
+        st.markdown("""
+        <div style="background-color: #1E2530; padding: 1.5rem; border-radius: 10px; border: 1px solid #2D3748;">
+            <h3 style="margin-top: 0; color: #4DA6FF;">🔍 Search Configuration</h3>
+        </div>
+        """, unsafe_allow_html=True)
 
-    col_classify, col_reset = st.columns([2, 1])
+        clinical_term = st.text_input(
+            "Clinical indication:",
+            value="diabetic retinopathy",
+            help="Enter any clinical condition (e.g., Alzheimer's disease, lung cancer, multiple sclerosis)",
+            placeholder="Enter clinical condition...",
+        )
 
-    with col_classify:
-        if st.button("Classify Intent", type="secondary", use_container_width=True):
-            if user_description.strip():
-                with st.spinner("Analyzing your research needs..."):
-                    result = classify_user_intent(user_description)
-                    st.session_state["classified_challenges"] = result
-                    st.session_state["selected_challenges"] = result.get("relevant_challenges", [])
-                    st.session_state["custom_focus"] = result.get("custom_focus")
-            else:
-                st.warning("Please describe what you're looking for.")
+        st.markdown("""
+        <p style="color: #718096; font-size: 0.85rem; margin-top: 0.5rem;">
+        <strong>Pipeline:</strong> MeSH mapping → PubMed search → Quality filter → Relevance scoring → Data extraction
+        </p>
+        """, unsafe_allow_html=True)
 
-    with col_reset:
-        if st.button("Use All Challenges", use_container_width=True):
-            st.session_state["classified_challenges"] = None
-            st.session_state["selected_challenges"] = list(STANDARD_CHALLENGES.keys())
-            st.session_state["custom_focus"] = None
+    with challenge_col:
+        st.markdown("""
+        <div style="background-color: #1E2530; padding: 1.5rem; border-radius: 10px; border: 1px solid #2D3748;">
+            <h3 style="margin-top: 0; color: #4DA6FF;">🎯 Challenge Configuration</h3>
+        </div>
+        """, unsafe_allow_html=True)
+
+        user_description = st.text_area(
+            "Describe your research needs (optional):",
+            placeholder="e.g., 'Find papers on predicting disease progression and identifying fast progressors for trial enrichment'",
+            help="The LLM will map your description to standard challenge categories.",
+            height=80,
+        )
+
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("🤖 Classify Intent", use_container_width=True):
+                if user_description.strip():
+                    with st.spinner("Analyzing..."):
+                        result = classify_user_intent(user_description)
+                        st.session_state["classified_challenges"] = result
+                        st.session_state["selected_challenges"] = result.get("relevant_challenges", [])
+                        st.session_state["custom_focus"] = result.get("custom_focus")
+                else:
+                    st.warning("Enter a description first.")
+
+        with btn_col2:
+            if st.button("↺ Reset All", use_container_width=True):
+                st.session_state["classified_challenges"] = None
+                st.session_state["selected_challenges"] = list(STANDARD_CHALLENGES.keys())
+                st.session_state["custom_focus"] = None
 
     # Display classification results
     if st.session_state.get("classified_challenges"):
         result = st.session_state["classified_challenges"]
-
-        st.markdown("**LLM Analysis:**")
-        st.info(result.get("reasoning", "No reasoning provided"))
-
+        st.success(f"**Analysis:** {result.get('reasoning', 'No reasoning provided')}")
         if result.get("custom_focus"):
-            st.markdown(f"**Specific Focus:** {result['custom_focus']}")
+            st.info(f"**Focus:** {result['custom_focus']}")
 
-    # Challenge selection checkboxes
-    st.markdown("**Select Challenges to Assess:**")
+    # Challenge selection in a nice grid
+    st.markdown("#### Select Challenges to Assess")
 
-    challenge_cols = st.columns(2)
+    challenge_cols = st.columns(3)
     selected = []
 
     for i, (cid, info) in enumerate(STANDARD_CHALLENGES.items()):
-        col = challenge_cols[i % 2]
+        col = challenge_cols[i % 3]
         is_selected = cid in st.session_state.get("selected_challenges", [])
 
         with col:
@@ -330,32 +513,13 @@ def main():
             ):
                 selected.append(cid)
 
-    # Update selected challenges
     st.session_state["selected_challenges"] = selected if selected else list(STANDARD_CHALLENGES.keys())
 
-    st.caption(f"Selected: {len(st.session_state['selected_challenges'])} challenges")
+    st.caption(f"✓ {len(st.session_state['selected_challenges'])} of {len(STANDARD_CHALLENGES)} challenges selected")
 
     st.markdown("---")
 
-    # Main content
-    st.subheader("Search Configuration")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        clinical_term = st.text_input(
-            "Clinical term:",
-            value="diabetic retinopathy",
-            help="The clinical condition to search for",
-        )
-
-    with col2:
-        st.markdown("**Pipeline Overview:**")
-        st.caption("""
-        1. Map to MeSH (snek) → 2. Search PubMed → 3. Deduplicate
-        4. Filter quality → 5. Score relevance → 6. Extract data
-        """)
-
-    # Run pipeline
+    # Run pipeline button
     if st.button("🚀 Run Pipeline", type="primary", use_container_width=True):
         if not clinical_term:
             st.error("Please enter a clinical term.")
@@ -566,7 +730,18 @@ def main():
         clinical_term = st.session_state.get("clinical_term", "")
 
         st.markdown("---")
-        st.header(f"Results: {len(extracted)} Papers")
+
+        # Results header with stats
+        st.markdown(f"""
+        <div style="background: linear-gradient(90deg, #1E2530 0%, #0E1117 100%);
+                    padding: 1.5rem; border-radius: 10px; border-left: 4px solid #4DA6FF;
+                    margin-bottom: 1rem;">
+            <h2 style="margin: 0; color: #4DA6FF;">📊 Results: {len(extracted)} Papers</h2>
+            <p style="color: #718096; margin: 0.5rem 0 0 0;">
+                Clinical indication: <strong style="color: #E0E0E0;">{clinical_term}</strong>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
         # ============ FILTERS & SORTING ============
         st.subheader("Filter & Sort")
@@ -626,6 +801,17 @@ def main():
             "Papers by Year", "Journal Distribution", "Challenge Heatmap", "Method Clusters"
         ])
 
+        # Dark theme for plotly charts
+        plotly_dark_template = {
+            'layout': {
+                'paper_bgcolor': '#0E1117',
+                'plot_bgcolor': '#1E2530',
+                'font': {'color': '#FAFAFA'},
+                'xaxis': {'gridcolor': '#2D3748', 'linecolor': '#2D3748'},
+                'yaxis': {'gridcolor': '#2D3748', 'linecolor': '#2D3748'},
+            }
+        }
+
         with viz_tab1:
             # Papers by year bar chart
             year_counts = Counter(int(p.get("year", 0) or 0) for p in filtered if p.get("year"))
@@ -634,8 +820,16 @@ def main():
                 for year, count in sorted(year_counts.items()) if year > 0
             ])
             if not year_df.empty:
-                fig = px.bar(year_df, x="Year", y="Count", title="Publications by Year")
-                fig.update_layout(xaxis_tickmode='linear')
+                fig = px.bar(year_df, x="Year", y="Count", title="Publications by Year",
+                            color_discrete_sequence=['#4DA6FF'])
+                fig.update_layout(
+                    xaxis_tickmode='linear',
+                    paper_bgcolor='#0E1117',
+                    plot_bgcolor='#1E2530',
+                    font_color='#FAFAFA',
+                    xaxis=dict(gridcolor='#2D3748'),
+                    yaxis=dict(gridcolor='#2D3748'),
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
         with viz_tab2:
@@ -646,7 +840,12 @@ def main():
                 fig = px.pie(
                     values=list(top_journals.values()),
                     names=list(top_journals.keys()),
-                    title="Top 10 Journals"
+                    title="Top 10 Journals",
+                    color_discrete_sequence=px.colors.sequential.Blues_r,
+                )
+                fig.update_layout(
+                    paper_bgcolor='#0E1117',
+                    font_color='#FAFAFA',
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -674,9 +873,15 @@ def main():
                     colorscale="Blues",
                     text=heatmap_data,
                     texttemplate="%{text}",
-                    textfont={"size": 14},
+                    textfont={"size": 14, "color": "#FAFAFA"},
                 ))
-                fig.update_layout(title="Challenge Coverage Heatmap", height=400)
+                fig.update_layout(
+                    title="Challenge Coverage Heatmap",
+                    height=400,
+                    paper_bgcolor='#0E1117',
+                    plot_bgcolor='#1E2530',
+                    font_color='#FAFAFA',
+                )
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No challenges selected for visualization.")
@@ -689,7 +894,15 @@ def main():
                 for name, papers in clusters.items() if papers
             ])
             if not cluster_df.empty:
-                fig = px.bar(cluster_df, x="Method Category", y="Count", title="Papers by Method Type")
+                fig = px.bar(cluster_df, x="Method Category", y="Count", title="Papers by Method Type",
+                            color_discrete_sequence=['#4DA6FF'])
+                fig.update_layout(
+                    paper_bgcolor='#0E1117',
+                    plot_bgcolor='#1E2530',
+                    font_color='#FAFAFA',
+                    xaxis=dict(gridcolor='#2D3748'),
+                    yaxis=dict(gridcolor='#2D3748'),
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
         # ============ AI INSIGHTS ============
