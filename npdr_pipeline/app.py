@@ -506,17 +506,20 @@ def main():
     # Challenge selection in a nice grid
     st.markdown("#### Select Challenges to Assess")
 
+    # Initialize checkbox states if not already set
+    for cid in STANDARD_CHALLENGES.keys():
+        if f"challenge_{cid}" not in st.session_state:
+            st.session_state[f"challenge_{cid}"] = True  # Default all checked
+
     challenge_cols = st.columns(3)
     selected = []
 
     for i, (cid, info) in enumerate(STANDARD_CHALLENGES.items()):
         col = challenge_cols[i % 3]
-        is_selected = cid in st.session_state.get("selected_challenges", [])
 
         with col:
             if st.checkbox(
                 f"{info['name']}",
-                value=is_selected,
                 key=f"challenge_{cid}",
                 help=info["description"],
             ):
