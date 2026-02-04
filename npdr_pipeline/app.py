@@ -476,8 +476,13 @@ def main():
                     with st.spinner("Analyzing..."):
                         result = classify_user_intent(user_description)
                         st.session_state["classified_challenges"] = result
-                        st.session_state["selected_challenges"] = result.get("relevant_challenges", [])
+                        relevant = result.get("relevant_challenges", [])
+                        st.session_state["selected_challenges"] = relevant
                         st.session_state["custom_focus"] = result.get("custom_focus")
+                        # Update checkbox states directly to sync with classification
+                        for cid in STANDARD_CHALLENGES.keys():
+                            st.session_state[f"challenge_{cid}"] = cid in relevant
+                        st.rerun()
                 else:
                     st.warning("Enter a description first.")
 
@@ -486,6 +491,10 @@ def main():
                 st.session_state["classified_challenges"] = None
                 st.session_state["selected_challenges"] = list(STANDARD_CHALLENGES.keys())
                 st.session_state["custom_focus"] = None
+                # Reset all checkboxes to checked
+                for cid in STANDARD_CHALLENGES.keys():
+                    st.session_state[f"challenge_{cid}"] = True
+                st.rerun()
 
     # Display classification results
     if st.session_state.get("classified_challenges"):
