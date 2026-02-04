@@ -163,6 +163,9 @@ def main():
     st.title("🔬 NPDR AI Literature Tracker")
     st.markdown("*Structured extraction for diabetic retinopathy AI/ML literature*")
 
+    # Get current year for date filters
+    current_year = datetime.now().year
+
     # Sidebar
     with st.sidebar:
         st.header("Pipeline Settings")
@@ -194,7 +197,6 @@ def main():
         st.markdown("---")
         st.markdown("**Date Range Filter**")
 
-        current_year = datetime.now().year
         year_range = st.slider(
             "Publication years",
             min_value=2010,
@@ -460,6 +462,7 @@ def main():
             st.session_state["clinical_term"] = clinical_term
             st.session_state["gap_analysis"] = gap_analysis
             st.session_state["trend_analysis"] = trend_analysis
+            st.session_state["year_range"] = year_range  # Store initial year range
 
         except Exception as e:
             st.error(f"Pipeline error: {str(e)}")
@@ -480,13 +483,14 @@ def main():
         filter_col1, filter_col2, filter_col3 = st.columns(3)
 
         with filter_col1:
-            # Year filter for results
-            years_available = sorted(set(int(p.get("year", 0) or 0) for p in extracted if p.get("year")))
-            if years_available:
+            # Year filter for results - use the initial year range from sidebar
+            initial_year_range = st.session_state.get("year_range", (2010, current_year))
+            year_options = list(range(initial_year_range[0], initial_year_range[1] + 1))
+            if year_options:
                 year_filter = st.select_slider(
                     "Filter by year",
-                    options=years_available,
-                    value=(min(years_available), max(years_available)),
+                    options=year_options,
+                    value=(initial_year_range[0], initial_year_range[1]),
                 )
             else:
                 year_filter = (0, 9999)
