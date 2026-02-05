@@ -8,6 +8,7 @@ This module provides a more technical approach to term expansion by:
 
 import os
 import requests
+from functools import lru_cache
 from typing import Optional
 import pandas as pd
 from .snowflake_search import get_snowflake_service, escape_sql_string, AI_TERMS
@@ -15,6 +16,9 @@ from .config import get_secret
 
 # Snek API endpoint
 SNEK_API_URL = "https://snek.application.formation.bio"
+
+# In-memory cache for MeSH terms
+_mesh_cache = {}
 
 
 def get_snek_api_key() -> str:
@@ -25,6 +29,8 @@ def get_snek_api_key() -> str:
 def get_mesh_terms_from_snek(condition: str, api_key: str = None) -> list[dict]:
     """Use snek to get MeSH terms for a clinical condition.
 
+    OPTIMIZED: Results are cached in memory to avoid redundant API calls.
+
     Args:
         condition: Clinical condition name (e.g., "diabetic retinopathy")
         api_key: Snek API Bearer token (uses env var if not provided)
@@ -32,6 +38,12 @@ def get_mesh_terms_from_snek(condition: str, api_key: str = None) -> list[dict]:
     Returns:
         List of dicts with 'mesh_id', 'mesh_name', 'labels', 'confidence'
     """
+    # Check cache first
+    cache_key = condition.lower().strip()
+    if cache_key in _mesh_cache:
+        print(f"  Using cached MeSH terms for '{condition}'")
+        return _mesh_cache[cache_key]
+
     api_key = api_key or get_snek_api_key()
 
     if not api_key:
@@ -102,6 +114,9 @@ def get_mesh_terms_from_snek(condition: str, api_key: str = None) -> list[dict]:
         if term["mesh_id"] not in seen_ids:
             seen_ids.add(term["mesh_id"])
             unique_terms.append(term)
+
+    # Cache the results
+    _mesh_cache[cache_key] = unique_terms
 
     return unique_terms
 

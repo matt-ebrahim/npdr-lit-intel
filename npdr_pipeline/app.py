@@ -618,22 +618,35 @@ def main():
             full_texts = {}
             pmids = [str(p.get("pmid", "")) for p in articles]
 
-            if enable_pmc:
-                next_step("Fetching PMC full text...")
-                pmc_results = batch_fetch_pmc_full_text(pmids, max_workers=max_workers)
-                for pmid, result in pmc_results.items():
-                    if result:
-                        full_texts[pmid] = result
-                st.info(f"Found {len(full_texts)}/{len(articles)} papers in PMC")
+            # OPTIMIZED: Run PMC and bioRxiv fetching in parallel when both enabled
+            if enable_pmc and enable_biorxiv:
+                next_step("Fetching full text (PMC + bioRxiv in parallel)...")
 
-            if enable_biorxiv:
-                papers_without_ft = [p for p in articles if str(p.get("pmid", "")) not in full_texts]
-                if papers_without_ft:
-                    next_step("Searching bioRxiv/medRxiv...")
-                    biorxiv_results = batch_search_biorxiv(papers_without_ft, max_workers=3)
+                from concurrent.futures import ThreadPoolExecutor as PoolExecutor
+
+                def fetch_pmc():
+                    return batch_fetch_pmc_full_text(pmids, max_workers=max_workers)
+
+                def fetch_biorxiv():
+                    return batch_search_biorxiv(articles, max_workers=3)
+
+                with PoolExecutor(max_workers=2) as executor:
+                    pmc_future = executor.submit(fetch_pmc)
+                    biorxiv_future = executor.submit(fetch_biorxiv)
+
+                    # Get PMC results
+                    pmc_results = pmc_future.result()
+                    for pmid, result in pmc_results.items():
+                        if result:
+                            full_texts[pmid] = result
+
+                    pmc_count = len(full_texts)
+
+                    # Get bioRxiv results (only for papers not already in PMC)
+                    biorxiv_results = biorxiv_future.result()
                     biorxiv_count = 0
                     for pmid, result in biorxiv_results.items():
-                        if result and result.get("found"):
+                        if pmid not in full_texts and result and result.get("found"):
                             full_texts[pmid] = {
                                 "pmid": pmid,
                                 "full_text": result.get("abstract", ""),
@@ -642,7 +655,32 @@ def main():
                                 "note": "Data from preprint",
                             }
                             biorxiv_count += 1
-                    st.info(f"Found {biorxiv_count} preprints on bioRxiv/medRxiv")
+
+                st.info(f"Found {pmc_count} in PMC, {biorxiv_count} preprints ({len(full_texts)} total)")
+
+            elif enable_pmc:
+                next_step("Fetching PMC full text...")
+                pmc_results = batch_fetch_pmc_full_text(pmids, max_workers=max_workers)
+                for pmid, result in pmc_results.items():
+                    if result:
+                        full_texts[pmid] = result
+                st.info(f"Found {len(full_texts)}/{len(articles)} papers in PMC")
+
+            elif enable_biorxiv:
+                next_step("Searching bioRxiv/medRxiv...")
+                biorxiv_results = batch_search_biorxiv(articles, max_workers=3)
+                biorxiv_count = 0
+                for pmid, result in biorxiv_results.items():
+                    if result and result.get("found"):
+                        full_texts[pmid] = {
+                            "pmid": pmid,
+                            "full_text": result.get("abstract", ""),
+                            "source": "bioRxiv",
+                            "is_preprint": True,
+                            "note": "Data from preprint",
+                        }
+                        biorxiv_count += 1
+                st.info(f"Found {biorxiv_count} preprints on bioRxiv/medRxiv")
 
             # Extract structured data with progress
             next_step("Extracting structured data...")
